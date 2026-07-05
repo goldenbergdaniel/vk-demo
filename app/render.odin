@@ -6,7 +6,6 @@ import "core:slice"
 import "core:strings"
 import "core:image/qoi"
 import "core:image/png"
-import "core:image/jpeg"
 import "core:os"
 import "ext:cgltf"
 import "ext:sdl"
@@ -81,6 +80,7 @@ Object :: struct
   desc_sets:    [NUM_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   model_mat:    m4x4f,
   model:        ^Model,
+  tiling:       [2]f32,
 }
 
 @(private="file")
@@ -113,7 +113,7 @@ g: struct
     handle:        vk.Pipeline, 
     layout:        vk.PipelineLayout,
   },
-  textures:        [enum{Smile, Screen}]Image,
+  textures:        [Texture_Name]Image,
   sampler:         vk.Sampler,
   viewport:        vk.Viewport,
   scissor:         vk.Rect2D,
@@ -121,6 +121,7 @@ g: struct
   main_constants:  struct
   {
     light_color:   [4]f32,
+    tiling:        [2]f32,
     vertex_addr:   vk.DeviceAddress,
   },
   post_constants:  struct
@@ -131,9 +132,15 @@ g: struct
   {
     transform:     matrix[4,4]f32,
   },
-  plane_model:     Model,
-  icosphere_model: Model,
+  models:          [enum{Plane, Icosphere}]Model,
   objects:         [2]Object,
+}
+
+Texture_Name :: enum
+{
+  Flesh,
+  Screen,
+  Concrete,
 }
 
 vk_init :: proc(window: ^platform.Window)
@@ -178,18 +185,18 @@ vk_init :: proc(window: ^platform.Window)
 
   desc_pool_sizes := [2]vk.DescriptorPoolSize{
     {
-      descriptorCount = 3 * NUM_FRAMES_IN_FLIGHT,
+      descriptorCount = len(g.objects) * NUM_FRAMES_IN_FLIGHT,
       type = .UNIFORM_BUFFER,
     },
     {
-      descriptorCount = 3 * 2 * NUM_FRAMES_IN_FLIGHT,
+      descriptorCount = len(g.objects) * 3 * NUM_FRAMES_IN_FLIGHT,
       type = .COMBINED_IMAGE_SAMPLER,
     },
   }
 
   vk_check(vk.CreateDescriptorPool(g.device.handle, &{
     sType = .DESCRIPTOR_POOL_CREATE_INFO,
-    maxSets = 3 * NUM_FRAMES_IN_FLIGHT,
+    maxSets = len(g.objects) * NUM_FRAMES_IN_FLIGHT,
     poolSizeCount = len(desc_pool_sizes),
     pPoolSizes = raw_data(desc_pool_sizes[:]),
   }, nil, &g.desc_pool))
@@ -218,6 +225,12 @@ vk_init :: proc(window: ^platform.Window)
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         stageFlags = {.FRAGMENT},
       },
+      {
+        binding = 3,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        stageFlags = {.FRAGMENT},
+      },
     }
     vk.CreateDescriptorSetLayout(g.device.handle, &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -235,7 +248,19 @@ vk_init :: proc(window: ^platform.Window)
       fmt.panicf("[FATAL][render_vk]: Failed to load image! (%s)", img_load_err)
     }
 
-    g.textures[.Smile] = vk_create_texture(img.pixels.buf[:], 
+    g.textures[.Flesh] = vk_create_texture(img.pixels.buf[:], 
+                                           u32(img.width), 
+                                           u32(img.height), 
+                                           .R8G8B8A8_SRGB,
+                                           .SHADER_READ_ONLY_OPTIMAL)
+
+    img, img_load_err = png.load_from_file("res/textures/concrete.png", allocator=mem.allocator(&g.perm_arena))
+    if img_load_err != nil
+    {
+      fmt.panicf("[FATAL][render_vk]: Failed to load image! (%s)", img_load_err)
+    }
+
+    g.textures[.Concrete] = vk_create_texture(img.pixels.buf[:], 
                                            u32(img.width), 
                                            u32(img.height), 
                                            .R8G8B8A8_SRGB,
@@ -561,31 +586,28 @@ vk_init :: proc(window: ^platform.Window)
     extent = g.swapchain.extent,
   }
 
-  // - Create objects ---
-  for &obj in g.objects
-  {
-    obj = create_object()
-  }
+  g.objects[0] = create_object(.Concrete, {32, 32})
+  g.objects[1] = create_object(.Flesh)
 
   // - Vertex and index buffer ---
   {
     model_load_err: cgltf.result
 
-    g.plane_model, model_load_err = load_model("res/models/plane.glb", &g.perm_arena)
+    g.models[.Plane], model_load_err = load_model("res/models/plane.glb", &g.perm_arena)
     if model_load_err != nil
     {
       fmt.panicf("[FATAL][render_vk]: Failed to load model:", model_load_err)
     }
 
-    write_model(&g.objects[0], &g.plane_model)
+    write_model(&g.objects[0], &g.models[.Plane])
 
-    g.icosphere_model, model_load_err = load_model("res/models/icosphere.glb", &g.perm_arena)
+    g.models[.Icosphere], model_load_err = load_model("res/models/icosphere.glb", &g.perm_arena)
     if model_load_err != nil
     {
       fmt.panicf("[FATAL][render_vk]: Failed to load model:", model_load_err)
     }
 
-    write_model(&g.objects[1], &g.icosphere_model)
+    write_model(&g.objects[1], &g.models[.Icosphere])
   }
 
   for obj in g.objects
@@ -602,8 +624,6 @@ vk_render :: proc(gm:^ Game)
 
   g.objects[0].model_mat = gm.projection1
   g.objects[1].model_mat = gm.projection2
-
-  g.main_constants.light_color = 1.0
 
   vk_check(vk.WaitForFences(g.device.handle, 1, &frame.fence, true, max(u64)))
   vk_check(vk.ResetFences(g.device.handle, 1, &frame.fence))
@@ -674,8 +694,11 @@ vk_render :: proc(gm:^ Game)
     g.uniforms.transform = obj.model_mat
 
     vk.CmdBindIndexBuffer(frame.cmd, obj.index_buf.handle, 0, .UINT32)
-    vk.CmdPushConstants(frame.cmd, g.pipelines[.Main].layout, {.VERTEX}, 0, size_of(g.main_constants), &g.main_constants)
     vk.CmdBindDescriptorSets(frame.cmd, .GRAPHICS, g.pipelines[.Main].layout, 0, 1, &obj.desc_sets[g.frame_idx], 0, nil)
+
+    g.main_constants.light_color = 1.0
+    g.main_constants.tiling = obj.tiling
+    vk.CmdPushConstants(frame.cmd, g.pipelines[.Main].layout, {.VERTEX}, 0, size_of(g.main_constants), &g.main_constants)
 
     vk.CmdDrawIndexed(frame.cmd, u32(len(obj.model.indices)), 1, 0, 0, 0)
   }
@@ -1349,10 +1372,10 @@ vk_create_texture :: proc(
   cmd := vk_begin_cmd_burst()
 
   vk_cmd_image_barrier(cmd, texture.handle, 
-                        {.COLOR},
-                        old_layout=.UNDEFINED, new_layout=.TRANSFER_DST_OPTIMAL,
-                        src_stages={.TOP_OF_PIPE}, src_access={},
-                        dst_stages={.TRANSFER}, dst_access={.TRANSFER_WRITE})
+                       {.COLOR},
+                       old_layout=.UNDEFINED, new_layout=.TRANSFER_DST_OPTIMAL,
+                       src_stages={.TOP_OF_PIPE}, src_access={},
+                       dst_stages={.TRANSFER}, dst_access={.TRANSFER_WRITE})
 
   vk.CmdCopyBufferToImage(cmd, staging_buf.handle, texture.handle,
                           dstImageLayout=.TRANSFER_DST_OPTIMAL,
@@ -1370,10 +1393,10 @@ vk_create_texture :: proc(
                           })
 
   vk_cmd_image_barrier(cmd, texture.handle, 
-                        {.COLOR},
-                        old_layout=.TRANSFER_DST_OPTIMAL, new_layout=layout,
-                        src_stages={.TRANSFER}, src_access={.TRANSFER_WRITE},
-                        dst_stages={.FRAGMENT_SHADER}, dst_access={.SHADER_READ})
+                       {.COLOR},
+                       old_layout=.TRANSFER_DST_OPTIMAL, new_layout=layout,
+                       src_stages={.TRANSFER}, src_access={.TRANSFER_WRITE},
+                       dst_stages={.FRAGMENT_SHADER}, dst_access={.SHADER_READ})
 
   vk_end_cmd_burst(cmd)
 
@@ -1494,9 +1517,10 @@ vk_check :: proc(result: vk.Result, location := #caller_location)
   }
 }
 
-create_object :: proc() -> Object
+create_object :: proc(texture: Texture_Name, tiling: [2]f32 = {1, 1}) -> Object
 {
   result: Object
+  result.tiling = tiling
 
   vk_check(vk.AllocateDescriptorSets(g.device.handle, &{
     sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -1530,7 +1554,7 @@ create_object :: proc() -> Object
         dstSet = result.desc_sets[i],
         dstBinding = 1,
         pImageInfo = &{
-          imageView = g.textures[.Smile].view,
+          imageView = g.textures[.Screen].view,
           sampler = g.sampler,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
@@ -1542,7 +1566,7 @@ create_object :: proc() -> Object
         dstSet = result.desc_sets[i],
         dstBinding = 2,
         pImageInfo = &{
-          imageView = g.textures[.Screen].view,
+          imageView = g.textures[texture].view,
           sampler = g.sampler,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },

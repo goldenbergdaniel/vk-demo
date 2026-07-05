@@ -6,7 +6,7 @@ import "core:math"
 import "/basic/vmath"
 import "/platform"
 
-CAMERA_FOV           :: 80
+CAMERA_FOV           :: 70
 CAMERA_ZOOM_MULT     :: 4
 CAMERA_MOV_SPEED     :: 0.05
 CAMERA_SENSITIVITY_H :: 0.5

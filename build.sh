@@ -5,6 +5,11 @@ source "$HOME/tools/vulkan/1.4.335.0/setup-env.sh"
 # export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 export VK_LOADER_DEBUG=error,warn
 
+MODE="debug"
+if [[ $1 == "check" || $1 == "debug" || $1 == "release" ]]; then MODE=$1; fi
+
+echo "[mode:$MODE]"
+
 echo "[shaders]"
 
 glslc -fshader-stage=vert -DVS app/shaders/shader.glsl -o app/shaders/out/shader.vert.spv
@@ -17,4 +22,12 @@ glslc -fshader-stage=frag -DFS app/shaders/postprocess.glsl -o app/shaders/out/p
 
 echo "[vk_demo]"
 
-odin run app -collection:ext=ext -o:none -linker:mold -debug
+if [[ $MODE == "check" ]]; then
+  odin check app -collection:ext=ext
+elif [[ $MODE == "debug" ]]; then
+  odin build app -collection:ext=ext -linker:mold -o:none -debug
+  ./app.bin
+elif [[ $MODE == "release" ]]; then
+  odin build app -collection:ext=ext -linker:mold -o:speed
+  ./app.bin
+fi

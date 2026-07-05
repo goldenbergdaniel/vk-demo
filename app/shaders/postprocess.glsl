@@ -32,7 +32,7 @@ void main()
 
 layout(location=0) in vec2 v_uv;
 
-layout(set=0, binding=2) uniform sampler2D u_texture;
+layout(set=0, binding=1) uniform sampler2D u_texture;
 
 layout(push_constant, std430) uniform Push_Constants
 {

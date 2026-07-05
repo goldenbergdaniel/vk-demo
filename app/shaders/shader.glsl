@@ -27,6 +27,7 @@ layout(push_constant)
 uniform Push_Constants
 {
   vec4 light_color;
+  vec2 tiling;
   Vertex_Buffer vertex_buf;
 } constants;
 
@@ -41,7 +42,7 @@ void main()
   gl_Position = uniforms.transform * vec4(vertex.position, 1);
   v_normal = vertex.normal;
   v_color = vertex.color;
-  v_uv = vertex.uv;
+  v_uv = vertex.uv * constants.tiling;
 }
 
 #endif
@@ -51,7 +52,7 @@ layout(location=0) in vec3 v_normal;
 layout(location=1) in vec4 v_color;
 layout(location=2) in vec2 v_uv;
 
-layout(set=0, binding=1) uniform sampler2D u_texture;
+layout(set=0, binding=2) uniform sampler2D u_texture;
 
 layout(location=0) out vec4 f_color;
 
@@ -62,17 +63,7 @@ void main()
 {
   vec4 texel = texture(u_texture, v_uv);
 
-  // if (v_color.a != 0)
-  // {
-  //   f_color = vec4(texel.rgb + v_color.rgb, texel.a) * uniforms.light_color;
-  // }
-  // else
-  // {
-  //   f_color = vec4(texel.rgb * v_color.rgb, texel.a) * uniforms.light_color;
-  // }
-
   float diffuse = 0.15 * dot(v_normal, light_dir);
-  // f_color = v_color * (ambient + diffuse);
   f_color = texel * (ambient + diffuse);
 }
 
