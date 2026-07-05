@@ -4,7 +4,7 @@
 layout(set=0, binding=0) 
 readonly uniform Uniform_Buffer
 {
-  vec4 light_color;
+  mat4 transform;
 } uniforms;
 
 #ifdef VS /////////////////////////////////////////////////////////////////////
@@ -26,7 +26,7 @@ readonly buffer Vertex_Buffer
 layout(push_constant) 
 uniform Push_Constants
 {
-  mat4 transform;
+  vec4 light_color;
   Vertex_Buffer vertex_buf;
 } constants;
 
@@ -38,7 +38,7 @@ void main()
 {
   Vertex vertex = constants.vertex_buf.vertices[gl_VertexIndex];
 
-  gl_Position = constants.transform * vec4(vertex.position, 1);
+  gl_Position = uniforms.transform * vec4(vertex.position, 1);
   v_normal = vertex.normal;
   v_color = vertex.color;
   v_uv = vertex.uv;
@@ -55,12 +55,12 @@ layout(set=0, binding=1) uniform sampler2D u_texture;
 
 layout(location=0) out vec4 f_color;
 
-const float ambient = 0.1;
+const float ambient = 0.2;
 const vec3 light_dir = {-0.5, 0, -0.5};
 
 void main()
 {
-  // vec4 texel = texture(u_texture, v_uv);
+  vec4 texel = texture(u_texture, v_uv);
 
   // if (v_color.a != 0)
   // {
@@ -72,7 +72,8 @@ void main()
   // }
 
   float diffuse = 0.15 * dot(v_normal, light_dir);
-  f_color = v_color * (ambient + diffuse);
+  // f_color = v_color * (ambient + diffuse);
+  f_color = texel * (ambient + diffuse);
 }
 
 #endif

@@ -17,11 +17,14 @@ Game :: struct
   prev_keys:         [platform.Key_Kind]bool,
   prev_mouse_btns:   [platform.Mouse_Btn_Kind]bool,
   prev_cursor_pos:   v2f,
-  projection:        m4x4f,
+  projection1:       m4x4f,
+  projection2:       m4x4f,
   t:                 f32,
   movement_mode:     enum{Free_Fly, Grounded},
   camera:            Camera,
   player:            Entity,
+  object:            Entity,
+  plane:             Entity,
   double_jump_timer: Timer,
 }
 
@@ -54,7 +57,6 @@ Timer :: struct
 @(private="file")
 _current_game: ^Game
 
-cube: Entity
 window_focused: bool
 
 get_current_game :: #force_inline proc(location := #caller_location) -> ^Game
@@ -70,17 +72,19 @@ set_current_game :: #force_inline proc(gm: ^Game)
 
 start :: proc(using gm: ^Game)
 {
-  // camera.pos = {0, 2, 0}
-  camera.pos = {0, 0, 0}
+  camera.pos = {0, 0, 2}
   camera.yaw = -90
   camera.fov = CAMERA_FOV
 
-  cube.pos = {0, -1, -3}
-  cube.rot = {-90, 90, 90}
-  // cube.scale = {1.0, 1.0, 1.0}
-  cube.scale = {0.01, 0.01, 0.01}
+  plane.pos = {0, -1, 0}
+  plane.rot = {0, 0, 0}
+  plane.scale = {32, 1, 32}
 
-  movement_mode = .Free_Fly
+  object.pos = {2, 1, -2}
+  object.rot = {-90, 0, 0}
+  object.scale = {1.0, 1.0, 1.0}
+
+  movement_mode = .Grounded
 }
 
 update :: proc(using gm: ^Game, dt: f32)
@@ -121,19 +125,6 @@ update :: proc(using gm: ^Game, dt: f32)
   else if gm.camera.pitch < -89
   {
     gm.camera.pitch = -89
-  }
-
-  if key_down(.Q)
-  {
-    gm.camera.roll = 15
-  }
-  else if key_down(.E)
-  {
-    gm.camera.roll = -15
-  }
-  else
-  {
-    gm.camera.roll = 0
   }
 
   camera_dir: v3f
@@ -277,22 +268,26 @@ update :: proc(using gm: ^Game, dt: f32)
     camera.fov = CAMERA_FOV
   }
 
-  // cube.rot.z += dt/2
-
   // print_camera(gm.camera)
 
-  gm.projection = vmath.IDENTITY_4X4F
+  gm.projection1 = vmath.IDENTITY_4X4F
+  gm.projection1 *= vmath.perspective(gm.camera.fov/math.DEG_PER_RAD, window_size.x/window_size.y, 0.05, 1000)
+  gm.projection1 *= vmath.rotation_4x4f(gm.camera.roll/math.DEG_PER_RAD, gm.camera.front)
+  gm.projection1 *= vmath.lookat(gm.camera.pos, gm.camera.front, gm.camera.right, gm.camera.up)
 
-  gm.projection *= vmath.perspective(gm.camera.fov/math.DEG_PER_RAD, window_size.x/window_size.y, 0.1, 1000)
+  gm.projection2 = gm.projection1
 
-  gm.projection *= vmath.rotation_4x4f(gm.camera.roll/math.DEG_PER_RAD, gm.camera.front)
-  gm.projection *= vmath.lookat(gm.camera.pos, gm.camera.front, gm.camera.right, gm.camera.up)
+  gm.projection1 *= vmath.translation_4x4f(plane.pos)
+  gm.projection1 *= vmath.scale_4x4f(plane.scale)
+  gm.projection1 *= vmath.rotation_4x4f(plane.rot.x/math.DEG_PER_RAD, {1, 0, 0})
+  gm.projection1 *= vmath.rotation_4x4f(plane.rot.y/math.DEG_PER_RAD, {0, 1, 0})
+  gm.projection1 *= vmath.rotation_4x4f(plane.rot.z/math.DEG_PER_RAD, {0, 0, 1})
 
-  gm.projection *= vmath.translation_4x4f(cube.pos)
-  gm.projection *= vmath.scale_4x4f(cube.scale)
-  gm.projection *= vmath.rotation_4x4f(cube.rot.x/math.DEG_PER_RAD, {1, 0, 0})
-  gm.projection *= vmath.rotation_4x4f(cube.rot.y/math.DEG_PER_RAD, {0, 1, 0})
-  gm.projection *= vmath.rotation_4x4f(cube.rot.z/math.DEG_PER_RAD, {0, 0, 1})
+  gm.projection2 *= vmath.translation_4x4f(object.pos)
+  gm.projection2 *= vmath.scale_4x4f(object.scale)
+  gm.projection2 *= vmath.rotation_4x4f(object.rot.x/math.DEG_PER_RAD, {1, 0, 0})
+  gm.projection2 *= vmath.rotation_4x4f(object.rot.y/math.DEG_PER_RAD, {0, 1, 0})
+  gm.projection2 *= vmath.rotation_4x4f(object.rot.z/math.DEG_PER_RAD, {0, 0, 1})
 
   gm.prev_keys = platform.global_input.keys
   gm.prev_mouse_btns = platform.global_input.mouse_btns

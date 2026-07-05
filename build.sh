@@ -2,7 +2,7 @@
 set -e
 
 source "$HOME/tools/vulkan/1.4.335.0/setup-env.sh"
-export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
+# export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json
 export VK_LOADER_DEBUG=error,warn
 
 echo "[shaders]"
